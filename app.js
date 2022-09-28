@@ -1,48 +1,148 @@
-//import express
-const express = require('express')
-//import body-parser
-const bodyParser = require('body-parser')
-
+const express = require('express');
+const bodyParser = require('body-parser');
 const graphqlHttp = require('express-graphql').graphqlHTTP;
-//adding schema so need to import
-const { buildSchema } = require('graphql')
-//this build schema takes a string so that we can build our schema
-//now we can create app
+const { buildSchema } = require('graphql');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const Event = require('./models/event');
+const User = require('./models/user');
+const user = require('./models/user');
+
 const app = express();
 
-app.use(bodyParser.json());//middleware to parse incoming json
+app.use(bodyParser.json());
 
-
-//query-> we wanna fetch data
-//mutation-> we wanna change data
-app.use('/graphql', graphqlHttp({
+app.use(
+  '/graphql',
+  graphqlHttp({
     schema: buildSchema(`
-        type RootQuery {
-            events: [String!]!
+        type Event {
+          _id: ID!
+          title: String!
+          description: String!
+          price: Float!
+          date: String!
+          creator: 
+        }
 
+        type User{
+          _id: ID!
+          email: String!
+          password: String
         }
-        
-        type RootMutation{
-            createEvent(name: String): String
+        input EventInput {
+          title: String!
+          description: String!
+          price: Float!
+          date: String!
         }
-        schema{
+
+        input UserInput{
+          email: String!
+          password: String!
+        }
+
+        type RootQuery {
+            events: [Event!]!
+        }
+        type RootMutation {
+            createEvent(eventInput: EventInput): Event
+            createUser(userInput: UserInput): User
+        }
+        schema {
             query: RootQuery
             mutation: RootMutation
         }
-    
     `),
-    rootValue: {//js object that has resolver function in it, resolver fun need to match our schema end points
-        //resolvers for events
-        events: () => {
-            return ['Romantic cooking', 'Sailing']
-        },
-        //resolver for createEvent
-        createEvent: (args) => {
-            const eventName = args.name;
-            return eventName;
-        }
+    rootValue: {
+      events: () => {
+        return Event.find()
+          .then(events => {
+            return events.map(event => {
+              return { ...event._doc, _id: event.id };
+            });
+          })
+          .catch(err => {
+            throw err;
+          });
+      },
+      createEvent: args => {
+        const event = new Event({
+          title: args.eventInput.title,
+          description: args.eventInput.description,
+          price: +args.eventInput.price,
+          date: new Date(args.eventInput.date),
+          creator: '6331359f7e2d04f9e2120ebb'
+        });
+        let createdEvent;
+        return event
+          .save()
+          .then(result => {
+            createdEvent = { ...result._doc, _id: result._doc._id.toString() };
+            return user.findById('6331359f7e2d04f9e2120ebb')
+            console.log(result);
+            
+          })
+          .then(user => {
+            if(!user){
+              throw new Error('User not found.');
+            }
+            user.createdEvents.push(event);
+            return user.save();
+          })
+          .then(result => {
+
+            return createdEvent
+          })
+          .catch(err => {
+            console.log(err);
+            throw err;
+          });
+      },
+      createUser : args => {
+        return User.findOne({email: args.userInput.email}).then( user => {
+            if(user){
+              throw new Error('User exists already.')
+            }
+            return bcrypt.hash(args.userInput.password, 12)
+        })
+        
+        .then(hashedPassword => {
+          const user = new User({
+            email: args.userInput.email,
+            password: hashedPassword
+          });
+          return user.save();
+        })
+        .then(result => {
+          return {...result._doc,password: null,_id: result.id};
+        })
+        .catch(err => {
+            throw err;
+        })
+        
+
+      }
     },
     graphiql: true
-}));
+  })
+);
 
-app.listen(3000);
+mongoose
+.connect(
+    // `mongodb+srv://${process.env.MONGO_USER}:${
+    //   process.env.MONGO_PASSWORD
+    // }@cluster0-ntrwp.mongodb.net/${process.env.MONGO_DB}?retryWrites=true`
+
+`mongodb://${process.env.MONGO_USER}:${
+      process.env.MONGO_PASSWORD
+    }@ac-dynm8cq-shard-00-00.fope35a.mongodb.net:27017,ac-dynm8cq-shard-00-01.fope35a.mongodb.net:27017,ac-dynm8cq-shard-00-02.fope35a.mongodb.net:27017/?ssl=true&replicaSet=atlas-11safd-shard-0&authSource=admin&retryWrites=true&w=majority`
+  )
+  
+  .then(() => {
+    app.listen(3000);
+  })
+  .catch(err => {
+    console.log(err);
+  });
